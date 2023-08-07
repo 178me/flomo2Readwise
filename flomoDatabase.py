@@ -3,6 +3,97 @@ from notion_client import Client
 from datetime import datetime
 from tenacity import retry, wait_exponential, stop_after_attempt
 
+import requests
+import hashlib
+from typing import List
+
+api_key = "flomo_web"
+app_version = "2.0"
+webp = 1
+# 逆向来自 _getSign 方法, 它是一个常量
+flomo_web_key = "dbbc3dd73364b4084c3a69346e0ce2b2"
+
+def md5value(key)->str:
+    input_name = hashlib.md5()
+    input_name.update(key.encode("utf-8"))
+    # create_sign 方法需要 md5 加密为 32位小写
+    result = (input_name.hexdigest()).lower()
+    return result
+
+# 传递时间戳
+def createSimpleObj(seed: str)->str:
+    # api_key=flomo_web&app_version=2.0&timestamp=1691246824&webp=1&
+    return "api_key={}&app_version={}&timestamp={}&webp={}".format(api_key, app_version, seed, webp)
+
+# 传递时间戳
+# 逆向 _getSign 得出
+# 结果需要: md5(api_key) ||| 32位小写
+def createParAndSign(seed: str)->str:
+    par = createSimpleObj(seed)
+    result = "{}{}".format(par, flomo_web_key)
+    output = md5value(result)
+    return output
+
+# 获取 flomo 原始文章
+# token 的获取方式参考: codelight.js 中的 getToken
+def fetch_raw_flomo_memo_images(id: str, token: str)-> List[str]:
+    # 1. 生成接口地址
+    timestamp = int(time()) # 时间戳
+    parBody = createSimpleObj(timestamp)
+    sign = createParAndSign(timestamp)
+    req_url = "https://flomoapp.com/api/v1/memo/{}?timestamp={}&api_key=flomo_web&app_version=2.0&webp=1&sign={}".format(id, timestamp, sign)
+    auth = 'Bearer {}'.format(token)
+    headers = {
+        'authority': 'flomoapp.com',
+        'accept': 'application/json, text/plain, */*',
+        'accept-language': 'en-US,en;q=0.9',
+        'origin': 'https://v.flomoapp.com',
+        'referer': 'https://v.flomoapp.com/',
+        'sec-ch-ua': '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site',
+        'authorization': auth,
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+    }
+    # 2. 请求该接口
+    resp = requests.get(req_url, headers = headers)
+    # 3. 返回内容中有一个 files 字段, 如果有附件的话(只要拿图片的可以过滤一下只要 type == image)则拿到所有附件的 url
+    # 接口类型参考: https://note.ms/python2
+    rawResp = resp.json()
+    files: List[dict] = rawResp["data"]["files"]
+    result: List[str] = []
+    if (len(files) >= 1):
+        # TODO: 过滤一下只要 type == image 的
+        for item in files:
+            # item['type'] == 'image'
+            real_image = item['url']
+            result.append(real_image)
+    return result 
+
+# 将图片链接转为图片Markdown标记
+def image_to_markdown(images: List[str]):
+    result: str = ""
+    for item in images:
+        result += "![]({})\n".format(item)
+    return result
+
+# 自动将附件添加到内容后面
+# 需要传递 id, sign, token
+def easy_append_images_to_memo(content: str, id: str, token: str)->str:
+    images = fetch_raw_flomo_memo_images(id, token)
+    if len(images) <= 0:
+        return content
+    append_content = image_to_markdown(images)
+    result = "{}\n{}".format(content, append_content)
+    return result
+
+# if __name__ == "__main__":
+#     content = "hello world\n balbala"
+#     pull_data = easy_append_images_to_memo("demo hello ", "Nzc2NjY1NTQ", "2468903|EkSoszB0ItF3DJjunaobwaoYdRMQHKDE9FnOAZ6x")
+#     print(pull_data)
 
 class FlomoDatabase:
     def __init__(self, api_key, database_id, logger, update_tags=True, skip_tags=['', 'welcome']):
