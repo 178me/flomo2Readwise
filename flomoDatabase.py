@@ -1,17 +1,22 @@
-from time import time
+from time import time, sleep
 from notion_client import Client
-from datetime import datetime
+from datetime import datetime, timedelta, datetime
 from tenacity import retry, wait_exponential, stop_after_attempt
 
+import os
 import requests
 import hashlib
-from typing import List
+import re
+from typing import List, Tuple
+from functools import wraps
 
 api_key = "flomo_web"
 app_version = "2.0"
 webp = 1
 # 逆向来自 _getSign 方法, 它是一个常量
 flomo_web_key = "dbbc3dd73364b4084c3a69346e0ce2b2"
+
+match_memo_id_reg = r".*=(\S+)"
 
 def md5value(key)->str:
     input_name = hashlib.md5()
@@ -82,18 +87,83 @@ def image_to_markdown(images: List[str]):
 
 # 自动将附件添加到内容后面
 # 需要传递 id, sign, token
-def easy_append_images_to_memo(content: str, id: str, token: str)->str:
+def easy_append_images_to_memo(content: str, id: str, token: str)->Tuple[str, List[str], int]:
     images = fetch_raw_flomo_memo_images(id, token)
-    if len(images) <= 0:
-        return content
+    _len = len(images)
+    if _len <= 0:
+        return content, [], 0
     append_content = image_to_markdown(images)
     result = "{}\n{}".format(content, append_content)
-    return result
+    return result, images, _len
 
 # if __name__ == "__main__":
 #     content = "hello world\n balbala"
-#     pull_data = easy_append_images_to_memo("demo hello ", "Nzc2NjY1NTQ", "2468903|EkSoszB0ItF3DJjunaobwaoYdRMQHKDE9FnOAZ6x")
+#     pull_data, _, _ = easy_append_images_to_memo("demo hello ", "Nzc2NjY1NTQ", "2468903|EkSoszB0ItF3DJjunaobwaoYdRMQHKDE9FnOAZ6x")
 #     print(pull_data)
+
+# copy by https://gist.github.com/ChrisTM/5834503?permalink_comment_id=2005466#gistcomment-2005466
+# def throttle(seconds=0, minutes=0, hours=0):
+#     throttle_period = timedelta(seconds=seconds, minutes=minutes, hours=hours)
+#     def throttle_decorator(fn):
+#         time_of_last_call = datetime.min
+#         @wraps(fn)
+#         def wrapper(*args, **kwargs):
+#             now = datetime.now()
+#             if now - time_of_last_call > throttle_period:
+#                 nonlocal time_of_last_call
+#                 time_of_last_call = now
+#                 return fn(*args, **kwargs)
+#         return wrapper
+#     return throttle_decorator
+
+class FastFetchRawMemoDatabase:
+    def __init__(self):
+        self.dict = set()
+        self.filename = "raw_memo.txt"
+        # TODO: 写入太频繁
+        # self.saveFn = throttle(seconds=2)
+    def fetch_KV_with_local(self)->List[str]:
+        try:
+            name = self.filename
+            if not os.path.exists(name):
+                return []
+            with open(name, 'r') as f:
+                pipe: List[str] = f.read().split("\n")
+                return pipe
+        except Exception:
+            print("本地文件 raw_memo 不存在")
+            return []
+        
+    # TODO: 实现初始化方法
+    # 1. 通过 \n 读取本地的 raw_memo.txt 文件
+    # 2. 将数组添加到存储缓存里
+    def init(self):
+        text = self.fetch_KV_with_local()
+        _len = len(text)
+        if len(text) >= 1:
+            for item in text:
+                result = item.strip()
+                if len(result) >= 1:
+                    self.dict.add(item)
+        print("从缓存取出(raw_memo.txt): {}".format(_len))
+    def has(self, id: str)->bool:
+        return self.dict.__contains__(id)
+    def save(self)->bool:
+        print("try to be save(local): {}".format(int(time())))
+        if len(self.dict) <= 0:
+            return
+        result = '\n'.join(list(self.dict))
+        if len(result) <= 0:
+            return False
+        with open(self.filename, 'w') as f:
+            f.write(result)
+        return True
+    def add(self, id: str)->str:
+        self.dict.add(id)
+        self.save()
+        # FIXME: 可能未生效, 不太懂 python 的玩法
+        # self.saveFn(self.save)
+        return id
 
 class FlomoDatabase:
     def __init__(self, api_key, database_id, logger, update_tags=True, skip_tags=['', 'welcome']):
@@ -102,6 +172,10 @@ class FlomoDatabase:
         self.logger = logger
         self.update_tags = update_tags
         self.skip_tags = skip_tags
+        # 这里暂时直接从环境变量拿吧
+        self.memo_token = os.getenv('MEMO_TOKEN', '')
+        self.fastKV = FastFetchRawMemoDatabase()
+        self.fastKV.init()
 
     def fetch_flomo_memos(self, callback, last_sync_time=None):
         start_time = time()
@@ -157,9 +231,11 @@ class FlomoDatabase:
         page_blocks = self.notion.blocks.children.list(page['id'])
         text_content = page_blocks['results'][0]['paragraph']['rich_text'][0]['plain_text']
 
+        raw_url: str = page['properties']['Link']['url']
+
         flomo_memo = {
             'tags':			tags,
-            'flomo_url':	page['properties']['Link']['url'],
+            'flomo_url':	raw_url,
             'edit_time':	last_edit_time_str,
             'text':			text_content
         }
@@ -167,6 +243,22 @@ class FlomoDatabase:
         if "得到" in tags:
             memo = self.parse_dedao_content(tags, text_content)
             flomo_memo.update(memo)
+
+        memo_id: str = re.search(match_memo_id_reg, raw_url).group(1)
+        if not self.fastKV.has(memo_id):
+            try:
+                apply_raw_memo_content, context_image, has_image = easy_append_images_to_memo(flomo_memo['text'], memo_id, self.memo_token)
+                if has_image:
+                    print("从原memo提取附件成功: {}".format(memo_id))
+                    flomo_memo['text'] = apply_raw_memo_content
+                else:
+                    print("原memo不存在附件: {}".format(memo_id))
+                self.fastKV.add(memo_id)
+            except Exception:
+                # FIXME: 可能是 token 过期了, 或者接口返回太频繁了
+                print("从原memo提取附件失败: {}".format(memo_id))
+                sleep(1.2)
+                pass
 
         if flomo_memo['text'] == '':
             return None
