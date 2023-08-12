@@ -3,9 +3,9 @@ from datetime import datetime
 from flomoDatabase import FlomoDatabase
 from readwise import Readwise
 from logger import loguru_logger
-os.environ['NOTION_INTEGRATION_TOKEN'] = "secret_sbEgXxZiwDwkTvoRW80il0CUhOL4Ns1eWr25y1temRJ"
-os.environ['NOTION_DATABASE_ID'] = "f323f02767944b14ab4fb33f9eb50d76"
-os.environ['READWISE_ACCESS_TOKEN'] = "71FYCeD5zI0CHATsKofjiHkcRItkMfypRECZRHHZeDXlmuW6se"
+# os.environ['NOTION_INTEGRATION_TOKEN'] = "secret_sbEgXxZiwDwkTvoRW80il0CUhOL4Ns1eWr25y1temRJ"
+# os.environ['NOTION_DATABASE_ID'] = "f323f02767944b14ab4fb33f9eb50d76"
+# os.environ['READWISE_ACCESS_TOKEN'] = "71FYCeD5zI0CHATsKofjiHkcRItkMfypRECZRHHZeDXlmuW6se"
 NOTION_INTEGRATION_TOKEN = os.environ['NOTION_INTEGRATION_TOKEN']
 NOTION_DATABASE_ID = os.environ['NOTION_DATABASE_ID']
 READWISE_ACCESS_TOKEN = os.environ['READWISE_ACCESS_TOKEN']
