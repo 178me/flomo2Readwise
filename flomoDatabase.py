@@ -7,7 +7,7 @@ import os
 import requests
 import hashlib
 import re
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from functools import wraps
 
 api_key = "flomo_web"
@@ -18,7 +18,8 @@ flomo_web_key = "dbbc3dd73364b4084c3a69346e0ce2b2"
 
 match_memo_id_reg = r".*=(\S+)"
 
-def md5value(key)->str:
+
+def md5value(key) -> str:
     input_name = hashlib.md5()
     input_name.update(key.encode("utf-8"))
     # create_sign 方法需要 md5 加密为 32位小写
@@ -26,14 +27,18 @@ def md5value(key)->str:
     return result
 
 # 传递时间戳
-def createSimpleObj(seed: str)->str:
+
+
+def createSimpleObj(seed: str) -> str:
     # api_key=flomo_web&app_version=2.0&timestamp=1691246824&webp=1&
     return "api_key={}&app_version={}&timestamp={}&webp={}".format(api_key, app_version, seed, webp)
 
 # 传递时间戳
 # 逆向 _getSign 得出
 # 结果需要: md5(api_key) ||| 32位小写
-def createParAndSign(seed: str)->str:
+
+
+def createParAndSign(seed: str) -> str:
     par = createSimpleObj(seed)
     result = "{}{}".format(par, flomo_web_key)
     output = md5value(result)
@@ -41,12 +46,15 @@ def createParAndSign(seed: str)->str:
 
 # 获取 flomo 原始文章
 # token 的获取方式参考: codelight.js 中的 getToken
-def fetch_raw_flomo_memo_images(id: str, token: str)-> List[str]:
+
+
+def fetch_raw_flomo_memo_images(id: str, token: str) -> List[str]:
     # 1. 生成接口地址
-    timestamp = int(time()) # 时间戳
+    timestamp = int(time())  # 时间戳
     parBody = createSimpleObj(timestamp)
     sign = createParAndSign(timestamp)
-    req_url = "https://flomoapp.com/api/v1/memo/{}?timestamp={}&api_key=flomo_web&app_version=2.0&webp=1&sign={}".format(id, timestamp, sign)
+    req_url = "https://flomoapp.com/api/v1/memo/{}?timestamp={}&api_key=flomo_web&app_version=2.0&webp=1&sign={}".format(
+        id, timestamp, sign)
     auth = 'Bearer {}'.format(token)
     headers = {
         'authority': 'flomoapp.com',
@@ -64,7 +72,7 @@ def fetch_raw_flomo_memo_images(id: str, token: str)-> List[str]:
         'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
     }
     # 2. 请求该接口
-    resp = requests.get(req_url, headers = headers)
+    resp = requests.get(req_url, headers=headers)
     # 3. 返回内容中有一个 files 字段, 如果有附件的话(只要拿图片的可以过滤一下只要 type == image)则拿到所有附件的 url
     # 接口类型参考: https://note.ms/python2
     rawResp = resp.json()
@@ -76,9 +84,11 @@ def fetch_raw_flomo_memo_images(id: str, token: str)-> List[str]:
             # item['type'] == 'image'
             real_image = item['url']
             result.append(real_image)
-    return result 
+    return result
 
 # 将图片链接转为图片Markdown标记
+
+
 def image_to_markdown(images: List[str]):
     result: str = ""
     for item in images:
@@ -87,7 +97,9 @@ def image_to_markdown(images: List[str]):
 
 # 自动将附件添加到内容后面
 # 需要传递 id, sign, token
-def easy_append_images_to_memo(content: str, id: str, token: str)->Tuple[str, List[str], int]:
+
+
+def easy_append_images_to_memo(content: str, id: str, token: str) -> Tuple[str, List[str], int]:
     images = fetch_raw_flomo_memo_images(id, token)
     _len = len(images)
     if _len <= 0:
@@ -116,13 +128,15 @@ def easy_append_images_to_memo(content: str, id: str, token: str)->Tuple[str, Li
 #         return wrapper
 #     return throttle_decorator
 
+
 class FastFetchRawMemoDatabase:
     def __init__(self):
         self.dict = set()
         self.filename = "raw_memo.txt"
         # TODO: 写入太频繁
         # self.saveFn = throttle(seconds=2)
-    def fetch_KV_with_local(self)->List[str]:
+
+    def fetch_KV_with_local(self) -> List[str]:
         try:
             name = self.filename
             if not os.path.exists(name):
@@ -133,7 +147,7 @@ class FastFetchRawMemoDatabase:
         except Exception:
             print("本地文件 raw_memo 不存在")
             return []
-        
+
     # TODO: 实现初始化方法
     # 1. 通过 \n 读取本地的 raw_memo.txt 文件
     # 2. 将数组添加到存储缓存里
@@ -146,24 +160,26 @@ class FastFetchRawMemoDatabase:
                 if len(result) >= 1:
                     self.dict.add(item)
         print("从缓存取出(raw_memo.txt): {}".format(_len))
-    def has(self, id: str)->bool:
+
+    def has(self, id: str) -> bool:
         return self.dict.__contains__(id)
-    def save(self)->bool:
+
+    def save(self) -> bool:
         print("try to be save(local): {}".format(int(time())))
         if len(self.dict) <= 0:
-            return
+            return False
         result = '\n'.join(list(self.dict))
         if len(result) <= 0:
             return False
         with open(self.filename, 'w') as f:
             f.write(result)
         return True
-    def add(self, id: str)->str:
+
+    def add(self, id: str) -> str:
         self.dict.add(id)
         self.save()
-        # FIXME: 可能未生效, 不太懂 python 的玩法
-        # self.saveFn(self.save)
         return id
+
 
 class FlomoDatabase:
     def __init__(self, api_key, database_id, logger, update_tags=True, skip_tags=['', 'welcome']):
@@ -173,7 +189,8 @@ class FlomoDatabase:
         self.update_tags = update_tags
         self.skip_tags = skip_tags
         # 这里暂时直接从环境变量拿吧
-        self.memo_token = os.getenv('MEMO_TOKEN', '')
+        self.memo_token = os.getenv(
+            'MEMO_TOKEN', '2495049|a3xCeTtKHBYC7gjLnMzsl2IIibcymClyPdGkbaaE')
         self.fastKV = FastFetchRawMemoDatabase()
         self.fastKV.init()
 
@@ -181,7 +198,7 @@ class FlomoDatabase:
         start_time = time()
         all_memos = []
         # get 100 pages at a time
-        result_list = self.notion.databases.query(self.database_id)
+        result_list: Any = self.notion.databases.query(self.database_id)
         while result_list:
             # save content of each page
             for page in result_list['results']:
@@ -247,7 +264,8 @@ class FlomoDatabase:
         memo_id: str = re.search(match_memo_id_reg, raw_url).group(1)
         if not self.fastKV.has(memo_id):
             try:
-                apply_raw_memo_content, context_image, has_image = easy_append_images_to_memo(flomo_memo['text'], memo_id, self.memo_token)
+                apply_raw_memo_content, context_image, has_image = easy_append_images_to_memo(
+                    flomo_memo['text'], memo_id, self.memo_token)
                 if has_image:
                     print("从原memo提取附件成功: {}".format(memo_id))
                     flomo_memo['text'] = apply_raw_memo_content
@@ -257,8 +275,7 @@ class FlomoDatabase:
             except Exception:
                 # FIXME: 可能是 token 过期了, 或者接口返回太频繁了
                 print("从原memo提取附件失败: {}".format(memo_id))
-                sleep(1.2)
-                pass
+                sleep(3)
 
         if flomo_memo['text'] == '':
             return None
